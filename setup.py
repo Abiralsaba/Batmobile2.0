@@ -21,5 +21,6 @@ setup(
         'mission_control_node = rover.mission_control_node:main',
         'mission_dashboard = rover.web:main',
         'rover_demo = rover.demo:main',
+        'zed_body_bridge = rover.zed_body_bridge:main',
     ]},
 )

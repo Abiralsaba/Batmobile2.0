@@ -1,6 +1,6 @@
-# Python-only base requirements for Ubuntu 22.04 VM development.
+# Portable Python requirements for Ubuntu 22.04 VM and Jetson development.
 # ROS 2 Humble is installed through apt/rosdep, not pip.
-PyYAML>=6.0,<7.0
 fastapi>=0.115,<1.0
 uvicorn>=0.30,<1.0
+# Required by FastAPI's TestClient in tests/test_web.py.
 httpx>=0.27,<1.0

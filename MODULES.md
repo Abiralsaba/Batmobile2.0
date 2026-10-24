@@ -4,7 +4,8 @@ Every module's opening docstring is its tiny in-file README. Files live together
 
 | File | Job |
 |---|---|
-| `vision.py` | Person track data and future ZED X bridge |
+| `vision.py` | Future consumer and validator of body-tracking observations |
+| `zed_body_bridge.py` | ZED 2i native SDK body tracking publisher (perception only) |
 | `gesture.py` | Temporal astronaut beckoning recognition |
 | `hammer.py` | Hammer detection / 3D target data (no grasp yet) |
 | `voice.py` | Offline Whisper command parsing / future ASR hook |

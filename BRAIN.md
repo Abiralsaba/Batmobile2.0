@@ -2,11 +2,11 @@
 
 ## Where code runs
 - **Development**: Ubuntu **22.04 VM running on Mac**, **ROS 2 Humble**; not native macOS.
-- **Deployment**: Jetson **Orin** target (exact module TBD), compatible Ubuntu 22.04 / JetPack / ROS 2 Humble. Verify board, JetPack, ZED X capture hardware and Stereolabs SDK support before installing.
+- **Deployment**: Jetson **Orin Nano Super**, Ubuntu 22.04.5, JetPack 6.2.2 / L4T R36.5.0, ARM64, Python 3.10 and ROS 2 Humble.
 - Mac VM architecture may be ARM64 or x86_64. Never commit prebuilt inference binaries for a different CPU/GPU. Jetson TensorRT engines are compiled on a compatible target.
 
 ## Hardware (existing unless explicitly deferred)
-GNSS, IMU, Kalman/EKF, waypoint navigation, MIT motor bus/control, Raspberry Pi; their actual topic names/source files will be supplied later. ZED X stereo camera available; proper GMSL2 capture interface required. No LiDAR in this phase. Arm pickup and GIVE are deferred, **not removed**.
+GNSS, IMU, Kalman/EKF, waypoint navigation, MIT motor bus/control, Raspberry Pi; their actual topic names/source files will be supplied later. The current camera is a USB ZED 2i using ZED SDK 5.2.3. No LiDAR in this phase. Arm pickup and GIVE are deferred, **not removed**.
 
 ## Task scope / competition
 URC 2027 Astronaut Assistance, first 50 points: EVA suit video/mic (5), GNSS approach within 3 m (5), quiet visual beckoning and autonomous FOLLOW within 3 m (15), STAY (5), FETCH hammer autonomously with arm (10), COME within 3 m (5), GIVE hammer (5). Entire Autonomy Mission is 40 minutes including route-finding.
@@ -34,11 +34,19 @@ Current scaffold is **non-actuating**. `mission_control_node.py` exposes `/dev/c
 ## Progress
 - [x] Flat scaffold + docs + tests
 - [ ] Verified Ubuntu 22.04 VM colcon build (run in actual VM)
-- [ ] Verified Jetson hardware/JetPack/ZED X compatibility
-- [ ] Camera tracking on recorded/ZED data
+- [x] Verified Jetson Orin Nano Super / JetPack 6.2.2 / ZED 2i environment
+- [x] Native ZED body bridge integrated and publishing valid JSON at approximately 15 Hz
+- [ ] Re-run integrated bridge with a person visible to record live ID/state/joint results
 - [ ] Visual following with safe depth checks
 - [ ] Full gesture/voice mission
 - [ ] Hammer localization + approval approach
 - [ ] EVA + manipulator for 50 points
 
 When implementing a stage, update this checklist, `ROADMAP.md`, module docstring and dependencies. Never claim a hardware test that was not run.
+
+## Migration record — 2026-10-25
+- Repository cloned to `/home/arm/Documents/Batmobile`, package `mars_rover`, source commit `b59c2403bebcbd10cdea88241ef86161131dcb92` on `main`.
+- The tested `/home/arm/zed_body_bridge.py` was preserved and copied unchanged to `rover/zed_body_bridge.py`; installed executable: `ros2 run mars_rover zed_body_bridge`.
+- Camera settings remain HD720 at 15 FPS, NEURAL_LIGHT, meters, IMAGE coordinates, HUMAN_BODY_FAST, BODY_18, tracking on, fitting off, confidence threshold 40.
+- `/rover/vision/bodies` (`std_msgs/msg/String`) passed a 30-message strict-JSON test at 14.99 Hz. No person was visible during that sample, so current-session human tracking remains to be observed.
+- Colcon build and 22 existing unit tests passed. No motor or arm actuator was invoked.

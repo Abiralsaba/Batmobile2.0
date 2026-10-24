@@ -1,5 +1,6 @@
-# Jetson Python packages ONLY. Verify versions with JetPack + ZED first.
+# Jetson Python packages only; tested on Python 3.10 / JetPack 6.2.2.
 -r requirements.txt
+# ZED SDK 5.2.3 pyzed runtime dependency; tested here with NumPy 1.26.4.
 numpy>=1.23,<2.0
-# ROS 2 Humble, ZED SDK, CUDA, TensorRT, ZED GMSL2 drivers: see DEPENDENCIES.md.
-# Do not add generic pip torch / tensorrt / pyzed without Jetson validation.
+# ROS 2 Humble, ZED SDK, CUDA and pyzed are system/vendor dependencies.
+# Do not install generic pip torch, TensorRT or pyzed packages.
