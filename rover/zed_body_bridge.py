@@ -1,6 +1,6 @@
+"""Single camera owner: fresh BODY_18 observations, CAMERA/IMAGE meters."""
 import json
 import math
-import time
 
 import pyzed.sl as sl
 import rclpy
@@ -45,6 +45,9 @@ def main():
         bt.body_format = sl.BODY_FORMAT.BODY_18
         bt.enable_tracking = True
         bt.enable_body_fitting = False
+        # SDK defaults to 0.2 s of predictions that may still report OK.
+        # Stage 2 must only count actual tracked detections as fresh.
+        bt.prediction_timeout_s = 0.0
 
         result = cam.enable_body_tracking(bt)
         if result != sl.ERROR_CODE.SUCCESS:
@@ -54,17 +57,19 @@ def main():
         runtime = sl.BodyTrackingRuntimeParameters()
         runtime.detection_confidence_threshold = 40
 
-        if hasattr(runtime, "measure3D_reference_frame"):
-            runtime.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
+        grab_runtime = sl.RuntimeParameters()
+        grab_runtime.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
 
         bodies = sl.Bodies()
         print("ZED BODY BRIDGE READY", flush=True)
 
         while rclpy.ok():
-            if cam.grab() != sl.ERROR_CODE.SUCCESS:
+            if cam.grab(grab_runtime) != sl.ERROR_CODE.SUCCESS:
                 continue
 
             result = cam.retrieve_bodies(bodies, runtime)
+            if result != sl.ERROR_CODE.SUCCESS or not bodies.is_new:
+                continue  # Never give a cached body result a fresh timestamp.
             people = []
 
             if result == sl.ERROR_CODE.SUCCESS:
@@ -98,7 +103,7 @@ def main():
 
             msg = String()
             msg.data = json.dumps({
-                "timestamp": time.time(),
+                "timestamp": bodies.timestamp.get_nanoseconds() / 1e9,
                 "detected": len(people) > 0,
                 "people": people
             }, allow_nan=False)

@@ -11,6 +11,8 @@ mission:
 ros:
   dev_command: /dev/cmd
   mission_state: /rover/state
-  person_track: /astronaut/track
+  person_track: /rover/vision/target
+  raw_bodies: /rover/vision/bodies
+  target_selection: /rover/vision/select
   hammer_track: /hammer/track
-  # Real ZED/IMU/GNSS topic names TBD
+  # IMU/GNSS topic names TBD. Vision tuning uses ROS parameters (see README).

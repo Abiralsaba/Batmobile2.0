@@ -22,5 +22,7 @@ setup(
         'mission_dashboard = rover.web:main',
         'rover_demo = rover.demo:main',
         'zed_body_bridge = rover.zed_body_bridge:main',
+        'vision = rover.vision:main',
+        'gesture = rover.gesture:main',
     ]},
 )

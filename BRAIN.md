@@ -36,9 +36,13 @@ Current scaffold is **non-actuating**. `mission_control_node.py` exposes `/dev/c
 - [ ] Verified Ubuntu 22.04 VM colcon build (run in actual VM)
 - [x] Verified Jetson Orin Nano Super / JetPack 6.2.2 / ZED 2i environment
 - [x] Native ZED body bridge integrated and publishing valid JSON at approximately 15 Hz
-- [ ] Re-run integrated bridge with a person visible to record live ID/state/joint results
+- [x] Re-run integrated bridge with a person visible to record live ID/state/joint results
+- [x] Stage 2 perception-only validation, persistent ID lock, median filter and watchdog
+- [x] Stage 2 Jetson build, 47 unit tests and live human/loss/disconnect checks (2026-10-25)
 - [ ] Visual following with safe depth checks
 - [ ] Full gesture/voice mission
+- [x] COME wrist-motion baseline selects any gesturing ID; 64 tests and synthetic ROS pipeline pass
+- [ ] Live COME recognition and false-positive evaluation (deferred by operator)
 - [ ] Hammer localization + approval approach
 - [ ] EVA + manipulator for 50 points
 
@@ -50,3 +54,13 @@ When implementing a stage, update this checklist, `ROADMAP.md`, module docstring
 - Camera settings remain HD720 at 15 FPS, NEURAL_LIGHT, meters, IMAGE coordinates, HUMAN_BODY_FAST, BODY_18, tracking on, fitting off, confidence threshold 40.
 - `/rover/vision/bodies` (`std_msgs/msg/String`) passed a 30-message strict-JSON test at 14.99 Hz. No person was visible during that sample, so current-session human tracking remains to be observed.
 - Colcon build and 22 existing unit tests passed. No motor or arm actuator was invoked.
+
+## Stage 2 — 2026-10-25
+- `vision` consumes `/rover/vision/bodies` and publishes `/rover/vision/target`;
+  the live frame is CAMERA/IMAGE, meters, not `base_link`. No actuator integration.
+- SDK prediction is disabled; only new body results carry their capture timestamp.
+- Live ID 0 remained locked through bearing changes and loss; subsequent ID 1
+  did not replace it automatically. Bridge stop invalidated within 0.591 s;
+  restart required explicit reselection. Full raw observations are local in `log/`.
+- All 47 unit tests, syntax checks, colcon build and isolated ROS interface checks
+  passed. Future gesture/navigation consumers still need integration and calibrated TF.
