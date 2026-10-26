@@ -11,7 +11,8 @@ setup(
         ('share/mars_rover/launch', glob('launch/*.launch.py')),
         ('share/mars_rover/web', ['web/index.html']),
     ],
-    install_requires=['setuptools', 'fastapi>=0.115,<1.0', 'uvicorn>=0.30,<1.0'],
+    install_requires=['setuptools', 'fastapi>=0.115,<1.0', 'uvicorn>=0.30,<1.0',
+                      'pyserial>=3.5,<4.0', 'pynmea2>=1.15,<2.0'],
     zip_safe=True,
     maintainer='Rover Team',
     maintainer_email='team@example.invalid',
@@ -24,5 +25,7 @@ setup(
         'zed_body_bridge = rover.zed_body_bridge:main',
         'vision = rover.vision:main',
         'gesture = rover.gesture:main',
+        'gnss_imu_node = rover.gnss_imu_node:main',
+        'pi_bridge_demo = rover.pi_bridge_demo:main',
     ]},
 )

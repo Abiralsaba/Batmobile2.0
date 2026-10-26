@@ -29,7 +29,10 @@ URC 2027 Astronaut Assistance, first 50 points: EVA suit video/mic (5), GNSS app
 The topic names in `config.yaml` are illustrative. Query real ROS topics, frames and ZED wrapper version before integrating. Keep all measurements timestamped and in named frames (person relative to ROS `base_link`: X forward, Y left; depth confidence/uncertainty included).
 
 ## Important boundary
-Current scaffold is **non-actuating**. `mission_control_node.py` exposes `/dev/cmd` and `/rover/state` only; actual perception, Whisper, obstacle navigation and motor integration are intentionally unfinished. Make simulations/mock tests pass before real robot connection.
+Current stack is **non-actuating**. `mission_control_node.py` retains `/dev/cmd`
+and `/rover/state`, consumes confirmed COME and validated vision targets, and
+publishes String-only `/rover/follow/guidance`. Camera-to-base_link calibration,
+Whisper, obstacle navigation and motor integration remain unfinished.
 
 ## Progress
 - [x] Flat scaffold + docs + tests
@@ -40,6 +43,7 @@ Current scaffold is **non-actuating**. `mission_control_node.py` exposes `/dev/c
 - [x] Stage 2 perception-only validation, persistent ID lock, median filter and watchdog
 - [x] Stage 2 Jetson build, 47 unit tests and live human/loss/disconnect checks (2026-10-25)
 - [ ] Visual following with safe depth checks
+- [x] Stage 4 motor-disabled 2 m FOLLOW diagnostics; synthetic tests only
 - [ ] Full gesture/voice mission
 - [x] COME wrist-motion baseline selects any gesturing ID; 64 tests and synthetic ROS pipeline pass
 - [ ] Live COME recognition and false-positive evaluation (deferred by operator)
@@ -64,3 +68,19 @@ When implementing a stage, update this checklist, `ROADMAP.md`, module docstring
   restart required explicit reselection. Full raw observations are local in `log/`.
 - All 47 unit tests, syntax checks, colcon build and isolated ROS interface checks
   passed. Future gesture/navigation consumers still need integration and calibrated TF.
+
+## Stage 4 — 2026-10-25
+- One confirmed COME plus a fresh matching vision lock authorizes the existing
+  WAIT_COMMAND -> FOLLOW transition. Continuous guidance retains that ID, with
+  2.0 m desired range, ±0.15 m deadband and no reverse.
+- Guidance is String JSON, always motors disabled and CALIBRATION_REQUIRED.
+  The diagnostic Z/-X axis mapping is not a calibrated camera-to-base_link TF.
+- Capture sequence/timestamp and a monotonic 0.5 s watchdog reject cached data.
+  Loss zeros guidance; disconnect/reselection revokes authorization into SAFE_STOP.
+  Recovery after disconnect requires reset/start/arrived and a new COME; restart
+  the existing one-shot gesture node before that new gesture.
+- Camera, vision, gesture, mission FSM and motor interfaces were preserved.
+  Only software/synthetic tests were run; manual distance/bearing calibration,
+  recovery and false-activation testing remain with the operators.
+- All 94 tests passed (including two isolated ROS transport/pipeline tests),
+  Python syntax and diff checks passed, and colcon build/executable discovery passed.

@@ -26,6 +26,7 @@ def main():
     camera_open = False
     pose_on = False
     body_on = False
+    preview = None
 
     try:
         result = cam.open(cfg)
@@ -61,6 +62,9 @@ def main():
         grab_runtime.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
 
         bodies = sl.Bodies()
+        if node.declare_parameter("preview", False).value:
+            from rover.preview import ZedPreview
+            preview = ZedPreview(node, cam)
         print("ZED BODY BRIDGE READY", flush=True)
 
         while rclpy.ok():
@@ -109,10 +113,14 @@ def main():
             }, allow_nan=False)
 
             pub.publish(msg)
+            if preview is not None and not preview.update(bodies):
+                break
 
     except KeyboardInterrupt:
         pass
     finally:
+        if preview is not None:
+            preview.close()
         if body_on:
             cam.disable_body_tracking()
         if pose_on:

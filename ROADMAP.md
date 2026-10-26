@@ -8,7 +8,7 @@
 | 1 | ZED 2i native SDK bridge verified on Jetson | `zed_body_bridge.py` | CAMERA/IMAGE meters and capture timestamps; rover TF pending |
 | 2 | Existing GNSS waypoint adapter (5 pts) | `nav.py`, `hw.py` | within 3 m in safe trials |
 | 3 | Stage 2 perception and identity locking implemented | `vision.py` | 47 tests; live tracking/loss/disconnect verified; no actuation |
-| 4 | FOLLOW motion, turns, stops | `nav.py`, `safety.py` | safe tracking left/right and stopping |
+| 4 | Stage 4: 2 m FOLLOW diagnostics implemented, motors disabled | `mission_control_node.py`, `nav.py` | software/synthetic ROS tests; manual camera calibration and physical evaluation pending |
 | 5 | STAY and local voice commands | `mission.py`, `voice.py` | latch remains stopped over >20 m separation |
 | 6 | COME using fresh GNSS + visual reacquisition | `eva.py`, `nav.py` | within 3 m of astronaut |
 | 7 | COME selection baseline implemented; full quiet beckoning/FOLLOW pending | `gesture.py`, `mission.py` | synthetic ROS confirmation passes; live recognition and false positives pending |
