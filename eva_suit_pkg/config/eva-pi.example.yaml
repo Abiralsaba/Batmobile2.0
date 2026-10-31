@@ -1,0 +1,43 @@
+# Raspberry Pi example verified with Ubuntu 24.04 / ROS 2 Jazzy hardware.
+# Copy to /etc/eva-suit/eva.yaml; keep machine-specific edits outside Git.
+serial:
+  reconnect_sec: 2.0
+  stale_sec: 2.0
+  gnss:
+    port: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5909047255-if00
+    baud: 115200
+    vid: null
+    pid: null
+    serial_number: ""
+    frame_id: eva_gnss_link
+  flex:
+    port: "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_28:84:85:66:5F:2C-if00"
+    baud: 115200
+    vid: null
+    pid: null
+    serial_number: ""
+
+voice:
+  enabled: true
+  alsa_device: plughw:2,0
+  whisper_binary: /opt/whisper.cpp/build/bin/whisper-cli
+  model: /opt/eva/models/ggml-small.en.bin
+  wake_phrase: ROVER
+  sample_rate: 16000
+  vad_rms: 450
+  silence_sec: 0.8
+  max_utterance_sec: 5.0
+  min_utterance_sec: 0.25
+  inference_timeout_sec: 30.0
+  min_mean_token_confidence: 0.55
+
+commands:
+  allowed: [COME, FOLLOW, STOP]
+  unsupported: [FETCH, GIVE]
+  cooldown_sec: 1.5
+  ack_timeout_sec: 3.0
+  rover_timeout_sec: 3.0
+
+ros:
+  domain_id: null
+  localhost_only: false

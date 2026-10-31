@@ -1,0 +1,24 @@
+[Unit]
+Description=Batmobile EVA suit ROS 2 backend for %i
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=%i
+Environment=EVA_WORKSPACE=%h/Documents/Batmobile
+Environment=EVA_CONFIG=/etc/eva-suit/eva.yaml
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash && source "${EVA_WORKSPACE}/install/setup.bash" && exec ros2 run eva_suit eva_backend --config "${EVA_CONFIG}"'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

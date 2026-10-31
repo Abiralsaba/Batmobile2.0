@@ -1,0 +1,43 @@
+serial:
+  reconnect_sec: 2.0
+  stale_sec: 2.0
+  gnss:
+    port: ""                 # Set to verified /dev/serial/by-id/... path.
+    baud: 115200
+    vid: null                # Optional integer USB VID/PID filters.
+    pid: null
+    serial_number: ""
+    frame_id: eva_gnss_link
+  flex:
+    port: ""                 # Set to the ESP32 /dev/serial/by-id/... path.
+    baud: 115200
+    vid: null
+    pid: null
+    serial_number: ""
+
+voice:
+  enabled: true
+  alsa_device: ""            # Empty selects one unambiguous USB capture device.
+  whisper_binary: /opt/whisper.cpp/build/bin/whisper-cli
+  model: /opt/eva/models/ggml-tiny.en.bin
+  wake_phrase: ROVER
+  sample_rate: 16000
+  vad_rms: 450
+  silence_sec: 0.8
+  max_utterance_sec: 5.0
+  min_utterance_sec: 0.25
+  inference_timeout_sec: 20.0
+  min_mean_token_confidence: 0.55
+
+commands:
+  allowed: [COME, FOLLOW, STOP]
+  unsupported: [FETCH, GIVE]
+  cooldown_sec: 1.5
+  ack_timeout_sec: 3.0
+  rover_timeout_sec: 3.0
+
+ros:
+  # Raspberry Pi: ROS 2 Jazzy. Rover Jetson: ROS 2 Humble. Set the same domain
+  # and validate bidirectional DDS discovery/QoS on the real network.
+  domain_id: null
+  localhost_only: false

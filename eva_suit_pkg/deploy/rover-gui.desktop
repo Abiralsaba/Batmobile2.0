@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Rover GUI
+Comment=Restore the Batmobile EVA mission-control display
+Exec=/usr/local/bin/eva-gui-launcher
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;Science;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

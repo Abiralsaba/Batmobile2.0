@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# EVA operator shortcut for Ubuntu 24.04 / ROS 2 Jazzy.
+# Deliberately omit `set -u`: Jazzy setup scripts reference optional unset variables.
+set -eo pipefail
+
+eva_workspace="${EVA_WORKSPACE:-${HOME}/Documents/Batmobile}"
+eva_venv="${EVA_VENV:-${eva_workspace}/.venv}"
+eva_state_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/eva-suit"
+eva_pid_file="${eva_state_dir}/backend.pid"
+eva_log_file="${eva_state_dir}/backend.log"
+eva_service="eva-suit-backend@${USER}.service"
+
+if [[ -n "${EVA_CONFIG:-}" ]]; then
+  eva_config="${EVA_CONFIG}"
+elif [[ -r /etc/eva-suit/eva.yaml ]]; then
+  eva_config=/etc/eva-suit/eva.yaml
+else
+  eva_config="${eva_workspace}/eva_suit_pkg/config/eva.yaml"
+fi
+
+mkdir -p "${eva_state_dir}"
+if [[ -f "${eva_venv}/bin/activate" ]]; then
+  source "${eva_venv}/bin/activate"
+fi
+source /opt/ros/jazzy/setup.bash
+source "${eva_workspace}/install/setup.bash"
+export EVA_CONFIG="${eva_config}"
+
+service_installed() {
+  [[ "$(systemctl show -p LoadState --value "${eva_service}" 2>/dev/null || true)" == "loaded" ]]
+}
+
+managed_pid() {
+  [[ -r "${eva_pid_file}" ]] || return 1
+  local pid
+  pid="$(<"${eva_pid_file}")"
+  if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null \
+      && tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -q 'eva_backend'; then
+    printf '%s\n' "${pid}"
+    return 0
+  fi
+  rm -f "${eva_pid_file}"
+  return 1
+}
+
+node_visible() {
+  ros2 node list 2>/dev/null | grep -qx '/eva_backend'
+}
+
+stop_managed_backend() {
+  local pid
+  if pid="$(managed_pid)"; then
+    kill -INT "${pid}" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.25
+    done
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -TERM "${pid}" 2>/dev/null || true
+    fi
+  fi
+  rm -f "${eva_pid_file}"
+}
+
+start_backend() {
+  if node_visible; then
+    return
+  fi
+  if managed_pid >/dev/null; then
+    return
+  fi
+  if service_installed; then
+    if ! systemctl is-active --quiet "${eva_service}"; then
+      sudo systemctl start "${eva_service}"
+    fi
+    return
+  fi
+  nohup ros2 run eva_suit eva_backend --config "${eva_config}" \
+    >>"${eva_log_file}" 2>&1 </dev/null &
+  local pid=$!
+  printf '%s\n' "${pid}" > "${eva_pid_file}"
+  disown "${pid}" 2>/dev/null || true
+  sleep 1
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    rm -f "${eva_pid_file}"
+    printf 'EVA backend failed to start; inspect %s\n' "${eva_log_file}" >&2
+    return 1
+  fi
+}
+
+stop_backend() {
+  if service_installed; then
+    if systemctl is-active --quiet "${eva_service}"; then
+      sudo systemctl stop "${eva_service}"
+    fi
+  fi
+  stop_managed_backend
+}
+
+show_status() {
+  if service_installed; then
+    systemctl --no-pager --full status "${eva_service}" || true
+  else
+    local pid
+    if pid="$(managed_pid)"; then
+      printf 'EVA backend: RUNNING (PID %s)\n' "${pid}"
+    else
+      printf 'EVA backend: STOPPED\n'
+    fi
+    printf 'Log: %s\n' "${eva_log_file}"
+  fi
+  if node_visible; then
+    printf 'ROS node: /eva_backend visible\n'
+  else
+    printf 'ROS node: /eva_backend not visible\n'
+  fi
+  printf 'Config: %s\n' "${eva_config}"
+}
+
+show_logs() {
+  if service_installed; then
+    exec journalctl -u "${eva_service}" -n 100 -f
+  fi
+  touch "${eva_log_file}"
+  exec tail -n 100 -F "${eva_log_file}"
+}
+
+show_topics() {
+  ros2 topic list 2>/dev/null | grep '^/eva/' || true
+}
+
+monitor() {
+  python3 - <<'PY'
+import json
+import math
+import sys
+import time
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import String
+
+
+def unpack(message):
+    try:
+        value = json.loads(message.data)
+        return value if isinstance(value, dict) else {}
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+
+
+class Monitor(Node):
+    def __init__(self):
+        super().__init__('eva_terminal_monitor')
+        self.gnss = {}
+        self.fix = None
+        self.flex = {}
+        self.mic = {}
+        self.system = {}
+        self.system_at = 0.0
+        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, '/eva/gnss/status',
+                                 lambda msg: self.update('gnss', unpack(msg)), qos)
+        self.create_subscription(String, '/eva/flex/status',
+                                 lambda msg: self.update('flex_status', unpack(msg)), qos)
+        self.create_subscription(String, '/eva/voice/status',
+                                 lambda msg: self.update('mic', unpack(msg)), qos)
+        self.create_subscription(String, '/eva/system/status',
+                                 lambda msg: self.update('system', unpack(msg)), qos)
+        self.create_subscription(NavSatFix, '/eva/gnss/fix', self.on_fix, 10)
+        self.create_subscription(String, '/eva/flex/raw', self.on_flex, 10)
+        self.create_subscription(String, '/eva/voice/event', self.on_voice, 10)
+
+    def update(self, name, value):
+        if name == 'flex_status':
+            self.flex.update(status=value)
+        elif name == 'system':
+            self.system = value
+            self.system_at = time.monotonic()
+        else:
+            setattr(self, name, value)
+
+    def on_fix(self, message):
+        if math.isfinite(message.latitude) and math.isfinite(message.longitude):
+            self.fix = (message.latitude, message.longitude)
+
+    def event(self, text):
+        sys.stdout.write('\r\033[K' + text + '\n')
+        sys.stdout.flush()
+
+    def on_flex(self, message):
+        data = unpack(message)
+        self.flex.update(data)
+        if data.get('event') in ('FOLLOW_START', 'FOLLOW_STOP'):
+            dispatch = data.get('command_dispatch') or {}
+            self.event(f"FLEX {data['event']} // {dispatch.get('status', 'LOCAL')}")
+
+    def on_voice(self, message):
+        data = unpack(message)
+        phrase = str(data.get('phrase') or '').strip()
+        if phrase or data.get('command'):
+            result = data.get('delivery')
+            if not result:
+                result = 'LOCAL_ACCEPT' if data.get('accepted') else f"REJECTED:{data.get('reason', '')}"
+            if result == 'REJECTED' and data.get('delivery_reason'):
+                result += f":{data['delivery_reason']}"
+            self.event(f"VOICE {phrase[:60]} // {result}")
+
+    def line(self):
+        state = self.gnss.get('state', '--')
+        sats = self.gnss.get('satellites')
+        gps = f"GPS:{state}" + (f"({sats})" if sats is not None else '')
+        if self.fix and state == 'FIX':
+            gps += f" {self.fix[0]:.6f},{self.fix[1]:.6f}"
+        bends = self.flex.get('bend_pct')
+        values = '/'.join(str(round(value)) for value in bends) if isinstance(bends, list) else '--/--/--'
+        flex_status = (self.flex.get('status') or {}).get('state', '--')
+        flex_state = ('FOLLOW' if self.flex.get('active') else
+                      'READY' if isinstance(bends, list) and flex_status == 'OK' else flex_status)
+        mic = self.mic.get('state', '--')
+        jetson_fresh = time.monotonic() - self.system_at <= 3.0
+        jetson = 'ON' if jetson_fresh and self.system.get('rover_connected') else 'OFF'
+        return f"{gps} | FLEX:{values} {flex_state} | MIC:{mic} | JETSON:{jetson}"
+
+
+rclpy.init()
+node = Monitor()
+last = 0.0
+try:
+    while rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.1)
+        now = time.monotonic()
+        if now - last >= 1.0:
+            sys.stdout.write('\r\033[K' + node.line())
+            sys.stdout.flush()
+            last = now
+except KeyboardInterrupt:
+    pass
+finally:
+    sys.stdout.write('\n')
+    node.destroy_node()
+    if rclpy.ok():
+        rclpy.shutdown()
+PY
+}
+
+case "${1:-monitor}" in
+  monitor|start)
+    start_backend
+    monitor
+    ;;
+  stop)
+    stop_backend
+    ;;
+  restart)
+    stop_backend
+    start_backend
+    show_status
+    ;;
+  status)
+    show_status
+    ;;
+  topics)
+    show_topics
+    ;;
+  logs)
+    show_logs
+    ;;
+  *)
+    printf 'Usage: eva [stop|restart|status|topics|logs]\n' >&2
+    exit 2
+    ;;
+esac

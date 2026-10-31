@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+eva_workspace="${EVA_WORKSPACE:-${HOME}/Documents/Batmobile}"
+if [[ -n "${EVA_CONFIG:-}" ]]; then
+  eva_config="${EVA_CONFIG}"
+elif [[ -r /etc/eva-suit/eva.yaml ]]; then
+  eva_config=/etc/eva-suit/eva.yaml
+else
+  eva_config="${eva_workspace}/eva_suit_pkg/config/eva.yaml"
+fi
+source /opt/ros/jazzy/setup.bash
+source "${eva_workspace}/install/setup.bash"
+exec ros2 run eva_suit eva_gui --config "${eva_config}"
