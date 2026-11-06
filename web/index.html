@@ -736,7 +736,7 @@
           <div class="metric"><label>Voice command</label><output data-bind="person.voice_command">NONE</output></div>
           <div class="metric"><label>Command source</label><output data-bind="person.command_source">NONE</output></div>
         </div>
-        <div class="actions"><button class="pixel-button" data-telemetry="person">Simulate Astronaut Track</button><button class="pixel-button primary" data-command="follow" data-confirm="true">Follow (DEV)</button><button class="pixel-button" data-command="fetch">Fetch Request (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
+        <div class="actions"><button class="pixel-button" data-telemetry="person">Simulate Astronaut Track</button><button class="pixel-button primary" data-command="follow" data-confirm="true">Follow (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
       </section>
 
       <section class="view" data-screen="follow" id="screen-follow">
@@ -754,7 +754,7 @@
             <div class="move-cell move-forward" data-move="FORWARD">▲</div><div class="move-cell move-left" data-move="LEFT">◀</div><div class="move-cell move-stop" data-move="STOP">■</div><div class="move-cell move-right" data-move="RIGHT">▶</div>
           </div><div class="metric" style="margin-top:14px"><label>Desired following distance</label><output data-bind="desired_follow_distance_m" data-unit=" m">2.0 m</output></div></div>
         </div>
-        <div class="actions"><button class="pixel-button" data-telemetry="person">Refresh DEV Track</button><button class="pixel-button" data-command="stay">Stay</button><button class="pixel-button" data-command="arrived">End Follow (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
+        <div class="actions"><button class="pixel-button" data-telemetry="person">Refresh DEV Track</button><button class="pixel-button" data-command="stay">Stay</button><button class="pixel-button" data-command="tracking_lost">Simulate Tracking Loss (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
       </section>
 
       <section class="view" data-screen="stay" id="screen-stay">
@@ -767,7 +767,7 @@
           <div class="metric"><label>Recent command</label><output data-bind="last_command.command">NONE</output></div>
           <div class="metric"><label>Command source</label><output data-bind="last_command.source">NONE</output></div>
         </div>
-        <div class="actions"><button class="pixel-button primary" data-command="come" data-confirm="true">Authorized Come (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
+        <div class="actions"><button class="pixel-button primary" data-command="fetch" data-confirm="true">Fetch Request (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
       </section>
 
       <section class="view" data-screen="find-hammer" id="screen-find-hammer">
@@ -783,7 +783,7 @@
             <div class="metric"><label>Target valid</label><output data-bind="hammer.valid">false</output></div>
           </div></div>
         </div>
-        <div class="actions"><button class="pixel-button primary" data-command="search">Search (DEV)</button><button class="pixel-button" data-telemetry="hammer">Simulate Hammer Target</button><button class="pixel-button" data-command="found">Mark Found (DEV)</button><button class="pixel-button safe" data-command="yes" data-confirm="true">Yes // Confirm</button><button class="pixel-button stop" data-command="no">No // Cancel</button></div>
+        <div class="actions"><button class="pixel-button primary" data-command="search" data-confirm="true">Search (DEV)</button><button class="pixel-button" data-telemetry="hammer">Simulate Hammer Target</button><button class="pixel-button" data-command="found">Mark Found (DEV)</button><button class="pixel-button safe" data-command="yes" data-confirm="true">Yes // Confirm</button><button class="pixel-button stop" data-command="no">No // Cancel</button></div>
       </section>
 
       <section class="view" data-screen="hammer-approach" id="screen-hammer-approach">
@@ -803,6 +803,7 @@
       <section class="view" data-screen="pick-hammer" id="screen-pick-hammer">
         <div class="screen-header"><div><div class="eyebrow">Astronaut Assistance // 07</div><h2>Pick Hammer</h2><p>The interface is reserved for verified manipulator integration.</p></div><div class="state-tag">Expected // FUTURE_ARM_PICKUP</div></div>
         <div class="future"><strong>FUTURE ARM INTEGRATION</strong><p>Gripper actuation, inverse kinematics and arm-camera calibration are not implemented.</p><button class="pixel-button" disabled>Pick Action Disabled</button></div>
+        <div class="actions"><button class="pixel-button" data-command="pickup_confirmed">Simulate Pickup Confirmation (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
       </section>
 
       <section class="view" data-screen="come" id="screen-come">
@@ -825,9 +826,10 @@
       </section>
 
       <section class="view" data-screen="give" id="screen-give">
-        <div class="screen-header"><div><div class="eyebrow">Astronaut Assistance // 09</div><h2>Give Hammer</h2><p>Reserved release-state display for future verified arm integration.</p></div><div class="state-tag">Future State</div></div>
-        <div class="grid two"><div class="metric"><label>Release state</label><output>NOT INTEGRATED</output></div><div class="metric"><label>Command status</label><output>DISABLED</output></div></div>
+        <div class="screen-header"><div><div class="eyebrow">Astronaut Assistance // 09</div><h2>Give Hammer</h2><p>After COME arrival, simulate GIVE and a separate ground-release confirmation.</p></div><div class="state-tag">WAIT_GIVE → FUTURE_ARM_RELEASE → MISSION_COMPLETE</div></div>
+        <div class="grid two"><div class="metric"><label>Simulated mission state</label><output data-bind="state">READY</output></div><div class="metric"><label>Physical release</label><output>NOT INTEGRATED</output></div></div>
         <div class="future" style="margin-top:16px"><strong>PHYSICAL RELEASE DISABLED</strong><button class="pixel-button" disabled>Give Action Disabled</button></div>
+        <div class="actions"><button class="pixel-button" data-command="give" data-confirm="true">Give Request (DEV)</button><button class="pixel-button" data-command="release_confirmed">Simulate Ground Release (DEV)</button><button class="pixel-button stop" data-command="stop">Stop</button></div>
       </section>
 
       <section class="view" data-screen="route-start" id="screen-route-start">

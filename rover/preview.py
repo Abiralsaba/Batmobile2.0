@@ -108,11 +108,11 @@ class ZedPreview:
                 return
 
             if (
-                data.get("gesture") == "COME"
+                data.get("gesture") == "FOLLOW"
                 and data.get("confirmed") is True
             ):
                 self.event_text = (
-                    f"COME CONFIRMED - PERSON {data.get('person_id')}"
+                    f"FOLLOW CONFIRMED - PERSON {data.get('person_id')}"
                 )
                 self.event_until = time.monotonic() + 5.0
 

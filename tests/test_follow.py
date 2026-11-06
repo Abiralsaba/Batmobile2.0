@@ -19,8 +19,8 @@ def target(wall, seq=1, pid=7, x=0., z=3., **updates):
     return data
 
 
-def come(wall, pid=7, **updates):
-    data = dict(gesture='COME', confirmed=True, person_id=pid, timestamp=wall)
+def follow_event(wall, pid=7, **updates):
+    data = dict(gesture='FOLLOW', confirmed=True, person_id=pid, timestamp=wall)
     data.update(updates)
     return data
 
@@ -51,7 +51,7 @@ class TestFollowController(unittest.TestCase):
         return data
 
     def gesture(self, **updates):
-        return self.c.receive_gesture(json.dumps(come(self.wall, **updates)), **self.clocks())
+        return self.c.receive_gesture(json.dumps(follow_event(self.wall, **updates)), **self.clocks())
 
     def activate(self, **updates):
         self.ready()
@@ -71,13 +71,30 @@ class TestFollowController(unittest.TestCase):
         self.assertEqual((result['linear_mps'], result['angular_rps']), (0., 0.))
         return result
 
-    def test_confirmed_come_uses_follow_transition_from_wait(self):
+    def test_confirmed_follow_uses_follow_transition_from_wait(self):
         self.activate()
         self.assertEqual(self.c.mission.state, State.FOLLOW)
         self.assertEqual(self.c.mission.history[-1], ('WAIT_COMMAND', 'follow', 'FOLLOW', 'gesture'))
         self.assertEqual(self.c.authorized_id, 7)
 
-    def test_wrong_states_ignore_come(self):
+    def test_post_follow_mission_stages_keep_guidance_and_gestures_disabled(self):
+        self.activate()
+        for event, expected in (
+            ('stay', State.STAY), ('fetch', State.FIND), ('found', State.ASK),
+            ('yes', State.NEAR), ('near', State.ARM),
+            ('pickup_confirmed', State.WAIT_COME), ('come', State.COME),
+            ('arrived', State.WAIT_GIVE), ('give', State.GIVE),
+            ('release_confirmed', State.DONE),
+        ):
+            with self.subTest(event=event):
+                self.tick(.01)
+                self.send_target()
+                self.assertTrue(self.command(event))
+                self.assertEqual(self.c.mission.state, expected)
+                self.assertFalse(self.gesture())
+                self.assertFalse(self.assert_stopped()['follow_gesture_allowed'])
+
+    def test_wrong_states_ignore_follow_event(self):
         for state in State:
             if state == State.WAIT:
                 continue
@@ -95,9 +112,9 @@ class TestFollowController(unittest.TestCase):
         self.send_target()
         self.assertEqual(self.c.mission.state, State.WAIT)
         self.assertTrue(self.command('follow'))  # Preserve mock FSM behavior.
-        self.assertEqual(self.assert_stopped()['reason'], 'COME_AUTHORIZATION_REQUIRED')
+        self.assertEqual(self.assert_stopped()['reason'], 'FOLLOW_AUTHORIZATION_REQUIRED')
 
-    def test_repeated_come_never_changes_authorized_id(self):
+    def test_repeated_follow_never_changes_authorized_id(self):
         self.activate()
         for pid in (7, 8, 7):
             self.tick()
@@ -118,7 +135,7 @@ class TestFollowController(unittest.TestCase):
 
     def test_pending_event_expires_and_duplicate_cannot_refresh_it(self):
         self.ready()
-        event = json.dumps(come(self.wall))
+        event = json.dumps(follow_event(self.wall))
         self.c.receive_gesture(event, **self.clocks())
         self.tick(.4)
         self.assertFalse(self.c.receive_gesture(event, **self.clocks()))
@@ -129,7 +146,8 @@ class TestFollowController(unittest.TestCase):
     def test_stale_malformed_unconfirmed_and_invalid_identity_gestures(self):
         self.ready()
         self.send_target()
-        for updates in ({'confirmed': False}, {'confirmed': 1}, {'gesture': 'come'},
+        for updates in ({'confirmed': False}, {'confirmed': 1}, {'gesture': 'COME'},
+                        {'gesture': 'follow'},
                         {'person_id': True}, {'person_id': -1}, {'person_id': 7.0},
                         {'person_id': None}, {'timestamp': self.wall-.51},
                         {'timestamp': self.wall+.2}, {'timestamp': True}):
@@ -139,7 +157,7 @@ class TestFollowController(unittest.TestCase):
             self.assertFalse(self.c.receive_gesture(raw, **self.clocks()))
         self.assertTrue(self.gesture())
 
-    def test_one_come_continues_at_three_meters(self):
+    def test_one_follow_continues_at_three_meters(self):
         self.activate()
         for _ in range(30):
             self.tick()
@@ -175,15 +193,17 @@ class TestFollowController(unittest.TestCase):
                 self.assertEqual(result['linear_mps'], 0.)
                 self.assertEqual(result['reason'], 'ROTATE_FIRST')
 
-    def test_loss_and_recovery_keep_same_id_without_new_come(self):
+    def test_loss_and_recovery_require_new_follow_gesture(self):
         self.activate()
         for state in ('SEARCHING', 'OFF', 'TERMINATE'):
             self.tick()
             self.send_target(valid=False, tracking_state=state, reason='TARGET_LOST')
             self.assert_stopped()
-            self.assertEqual(self.c.authorized_id, 7)
+            self.assertIsNone(self.c.authorized_id)
             self.tick()
             self.send_target()
+            self.assert_stopped()  # Seeing the person again is not authorization.
+            self.assertTrue(self.gesture())
             self.assertGreater(self.guidance()['linear_mps'], 0)
 
     def test_missing_and_different_ids_stop_without_switching(self):
@@ -192,9 +212,11 @@ class TestFollowController(unittest.TestCase):
             self.tick()
             self.send_target(pid=pid)
             self.assert_stopped()
-            self.assertEqual(self.c.authorized_id, 7)
+            self.assertIsNone(self.c.authorized_id)
         self.tick()
         self.send_target()
+        self.assert_stopped()
+        self.assertTrue(self.gesture())
         self.assertGreater(self.guidance()['linear_mps'], 0)
 
     def test_stale_positions_and_old_publication_rejected(self):
@@ -212,8 +234,8 @@ class TestFollowController(unittest.TestCase):
             self.mono += .1
             data['published_timestamp'] = self.wall
             self.c.receive_target(json.dumps(data), **self.clocks())
-        self.assertEqual(self.assert_stopped()['reason'], 'STALE_TARGET')
-        self.assertEqual(self.c.authorized_id, 7)
+        self.assertEqual(self.assert_stopped()['tracking_reason'], 'STALE_TARGET')
+        self.assertIsNone(self.c.authorized_id)
 
     def test_replayed_observation_cannot_recover_invalidated_target(self):
         self.activate()
@@ -226,14 +248,15 @@ class TestFollowController(unittest.TestCase):
         self.activate()
         self.tick()
         self.c.receive_target(json.dumps(target(self.wall, seq=self.c.sequence)), **self.clocks())
-        self.assertEqual(self.assert_stopped()['reason'], 'STALE_TARGET')
+        self.assertEqual(self.assert_stopped()['tracking_reason'], 'STALE_TARGET')
 
     def test_no_messages_monotonic_watchdog_revokes(self):
         self.activate()
         self.mono += .51  # No callbacks; even a frozen wall clock cannot extend guidance.
         result = self.assert_stopped()
-        self.assertTrue(result['reset_required'])
-        self.assertEqual(result['state'], 'SAFE_STOP')
+        self.assertFalse(result['reset_required'])
+        self.assertEqual(result['state'], 'WAIT_COMMAND')
+        self.assertTrue(result['follow_gesture_allowed'])
         self.assertIsNone(self.c.authorized_id)
 
     def test_disconnect_detected_before_next_target_without_timer(self):
@@ -241,8 +264,12 @@ class TestFollowController(unittest.TestCase):
         self.tick(.6)
         self.send_target()
         self.assert_stopped()
-        self.assertTrue(self.c.reset_required)
+        self.assertFalse(self.c.reset_required)
         self.assertFalse(self.gesture())
+        self.tick()
+        self.send_target()
+        self.assertTrue(self.gesture())
+        self.assertGreater(self.guidance()['linear_mps'], 0)
 
     def test_vision_disconnect_and_reselection_revoke(self):
         for reason in ('SENSOR_DISCONNECTED', 'RESELECTION_REQUIRED'):
@@ -250,19 +277,18 @@ class TestFollowController(unittest.TestCase):
             self.activate()
             self.tick()
             self.send_target(valid=False, reason=reason, reselection_required=True)
-            self.assertEqual(self.assert_stopped()['state'], 'SAFE_STOP')
+            self.assertEqual(self.assert_stopped()['state'], 'WAIT_COMMAND')
             self.tick()
             self.send_target()
-            self.assertFalse(self.gesture())
             self.assert_stopped()
+            self.assertTrue(self.gesture())
+            self.assertGreater(self.guidance()['linear_mps'], 0)
 
-    def test_reset_requires_new_come_and_new_vision_observation(self):
+    def test_tracking_loss_rejects_old_gesture_without_operator_reset(self):
         self.activate()
-        old_event = json.dumps(come(self.wall))
+        old_event = json.dumps(follow_event(self.wall))
         self.tick()
         self.send_target(reason='RESELECTION_REQUIRED', valid=False)
-        self.assertTrue(self.command('reset'))
-        self.ready()
         self.assertFalse(self.c.receive_gesture(old_event, **self.clocks()))
         self.tick()
         self.send_target()
@@ -295,9 +321,9 @@ class TestFollowController(unittest.TestCase):
         self.c.receive_target(json.dumps(target(self.wall, seq=1)), **self.clocks())
         self.assertTrue(self.gesture())
 
-    def test_stop_cancels_pending_come_and_delayed_event(self):
+    def test_stop_cancels_pending_follow_and_delayed_event(self):
         self.ready()
-        delayed = json.dumps(come(self.wall))
+        delayed = json.dumps(follow_event(self.wall))
         self.gesture()
         self.command('stop')
         self.tick(.1)
@@ -313,7 +339,12 @@ class TestFollowController(unittest.TestCase):
         self.send_target()
         self.tick()
         self.c.receive_target(json.dumps(target(self.wall, seq=1)), **self.clocks())
-        self.assertTrue(self.assert_stopped()['reset_required'])
+        self.assertEqual(self.assert_stopped()['reason'], 'FOLLOW_GESTURE_REQUIRED')
+        self.tick()
+        self.c.receive_target(json.dumps(target(self.wall, seq=1, pid=9)), **self.clocks())
+        self.assert_stopped()
+        self.assertTrue(self.gesture(pid=9))
+        self.assertEqual(self.c.authorized_id, 9)
 
     def test_invalid_target_numbers_frames_and_json_stop(self):
         self.activate()
@@ -350,7 +381,50 @@ class TestFollowController(unittest.TestCase):
             feed()
             self.assert_stopped()
         feed()
+        self.assert_stopped()
+        self.assertTrue(self.gesture())
         self.assertGreater(self.guidance()['linear_mps'], 0)
+
+    def test_stop_after_tracking_loss_cannot_be_cleared_by_gesture(self):
+        self.activate()
+        self.tick()
+        self.send_target(valid=False, reason='TARGET_LOST')
+        self.command('stop')
+        self.tick()
+        self.send_target()
+        self.assertFalse(self.gesture())
+        self.assertEqual(self.assert_stopped()['state'], 'SAFE_STOP')
+        self.assertFalse(self.guidance()['follow_gesture_allowed'])
+
+    def test_stay_or_stop_not_changed_by_camera_disconnect(self):
+        for command in ('stay', 'stop'):
+            self.setUp()
+            self.activate()
+            self.command(command)
+            expected = self.c.mission.state
+            self.tick(1.)
+            self.send_target(valid=False, reason='SENSOR_DISCONNECTED', reselection_required=True)
+            self.tick()
+            self.send_target()
+            self.assertFalse(self.gesture())
+            self.assertEqual(self.c.mission.state, expected)
+            self.assert_stopped()
+
+    def test_new_gesture_can_select_new_id_after_loss_but_not_before(self):
+        self.activate()
+        self.tick()
+        self.assertFalse(self.gesture(pid=9))
+        self.assertEqual(self.c.authorized_id, 7)
+        self.send_target(valid=False, reason='TARGET_LOST')
+        self.tick()
+        self.send_target(pid=9)
+        self.assert_stopped()
+        self.assertFalse(self.gesture(pid=7))  # Mismatched event cannot activate.
+        self.assert_stopped()
+        self.tick(.51)  # Expire pending mismatched event.
+        self.send_target(pid=9)
+        self.assertTrue(self.gesture(pid=9))
+        self.assertEqual(self.c.authorized_id, 9)
 
 
 class TestFollowerDeadband(unittest.TestCase):

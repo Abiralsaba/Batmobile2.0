@@ -374,8 +374,8 @@ class EVAWindow(QMainWindow):
         self._event(f"FLEX RAW {data.get('flex_raw')} // SEQ {data.get('seq')}")
 
     def on_gesture(self, data):
-        if data.get("gesture") == "COME":
-            self._event(f"ZED COME // PERSON {data.get('person_id', '--')}")
+        if data.get("gesture") == "FOLLOW":
+            self._event(f"ZED FOLLOW // PERSON {data.get('person_id', '--')}")
 
     def on_target(self, data):
         if data.get("locked") and data.get("valid"):

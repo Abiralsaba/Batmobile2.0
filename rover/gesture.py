@@ -1,4 +1,4 @@
-"""Detect COME from any person and request vision target lock.
+"""Detect FOLLOW arm motion and request vision target lock while mission permits.
 
 Perception only: never sends motor commands.
 """
@@ -38,7 +38,7 @@ def parse_json(text):
     return strict_json(text)
 
 
-class ComeMotion:
+class FollowMotion:
     """Recognize DOWN -> UP -> DOWN wrist movement."""
 
     def __init__(self):
@@ -98,7 +98,10 @@ class GestureNode(Node):
         self.request_wall = None
         self.request_mono = None
 
-        self.finished = False
+        self.enabled = False
+        self.control_deadline = None
+        self.control_stamp = None
+        self.rearm_after = 0.0
         self.validation_config = VisionConfig()
 
         raw_qos = QoSProfile(
@@ -120,6 +123,10 @@ class GestureNode(Node):
             10
         )
 
+        self.create_subscription(
+            String, "/rover/follow/guidance", self.on_guidance, 1
+        )
+
         self.select_pub = self.create_publisher(
             String, "/rover/vision/select", 10
         )
@@ -132,8 +139,34 @@ class GestureNode(Node):
         self.create_timer(0.2, self.watchdog, clock=self.watchdog_clock)
 
         self.get_logger().info(
-            "COME detection ready: ALL PEOPLE, motors disabled"
+            "FOLLOW detection ready; waiting for mission permission, motors disabled"
         )
+
+    def on_guidance(self, msg):
+        """Arm only on fresh WAIT_COMMAND guidance; STOP/STAY/FOLLOW disarm."""
+        self.watchdog()
+        try:
+            data = parse_json(msg.data)
+            if not isinstance(data, dict):
+                raise ValueError('invalid guidance')
+            stamp = data.get('published_timestamp')
+            allowed = data.get('follow_gesture_allowed')
+            age = time.time() - stamp if number(stamp) else math.inf
+            if (not number(stamp) or stamp <= 0 or not -0.1 <= age <= 0.5
+                    or type(allowed) is not bool):
+                raise ValueError('invalid or stale guidance')
+            if self.control_stamp is not None and stamp <= self.control_stamp:
+                return  # Replay never extends the permission deadline.
+            self.control_stamp = stamp
+            self.control_deadline = time.monotonic() + 0.5 - max(0., age)
+            enabled = allowed and data.get('state') == 'WAIT_COMMAND'
+            if not enabled or not self.enabled:
+                self.clear_attempt()
+            self.enabled = enabled
+        except (ValueError, TypeError):
+            self.enabled = False
+            self.control_deadline = None
+            self.clear_attempt()
 
     def clear_attempt(self):
         self.detectors.clear()
@@ -145,6 +178,10 @@ class GestureNode(Node):
 
     def watchdog(self):
         now = time.monotonic()
+
+        if self.control_deadline is None or now > self.control_deadline:
+            self.enabled = False
+            self.clear_attempt()
 
         if (
             self.last_raw_at is not None
@@ -164,10 +201,9 @@ class GestureNode(Node):
             self.clear_attempt()
 
     def on_bodies(self, msg):
-        if self.finished:
-            return
-
         self.watchdog()
+        if not self.enabled or time.monotonic() < self.rearm_after:
+            return
 
         try:
             data = validate_message(msg.data, self.validation_config)
@@ -243,7 +279,7 @@ class GestureNode(Node):
 
             if pid not in self.detectors:
                 self.detectors[pid] = {
-                    side: ComeMotion() for side in ARMS
+                    side: FollowMotion() for side in ARMS
                 }
 
             for side, (s, e, w) in ARMS.items():
@@ -255,7 +291,7 @@ class GestureNode(Node):
                     valid_point(p)
                     for p in (shoulder, elbow, wrist)
                 ):
-                    self.detectors[pid][side] = ComeMotion()
+                    self.detectors[pid][side] = FollowMotion()
                     continue
 
                 dy = wrist[1] - elbow[1]
@@ -289,12 +325,12 @@ class GestureNode(Node):
             self.select_pub.publish(command)
 
             self.get_logger().info(
-                f"COME FROM ID={pid} ARM={side}; requesting lock"
+                f"FOLLOW FROM ID={pid} ARM={side}; requesting lock"
             )
 
     def on_target(self, msg):
         self.watchdog()
-        if self.finished or self.pending is None:
+        if not self.enabled or self.pending is None:
             return
 
         try:
@@ -333,7 +369,7 @@ class GestureNode(Node):
 
         event = String()
         event.data = json.dumps({
-            "gesture": "COME",
+            "gesture": "FOLLOW",
             "confirmed": True,
             "person_id": self.pending,
             "arm": self.pending_arm,
@@ -343,11 +379,13 @@ class GestureNode(Node):
         self.event_pub.publish(event)
 
         self.get_logger().info(
-            f"COME CONFIRMED! ID={self.pending} LOCKED"
+            f"FOLLOW CONFIRMED! ID={self.pending} LOCKED"
         )
 
-        # Only one COME activation per run.
-        self.finished = True
+        # Clear both arms' partial motion; another event needs an entirely new
+        # gesture after cooldown AND fresh permission from the mission controller.
+        self.clear_attempt()
+        self.rearm_after = time.monotonic() + 1.0
 
 
 def main():

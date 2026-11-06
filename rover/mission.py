@@ -16,6 +16,10 @@ class State(str, Enum):
     ASK = 'WAIT_APPROVAL'
     NEAR = 'APPROACH_HAMMER'  # STATE ONLY; not an actual approach
     ARM = 'FUTURE_ARM_PICKUP'
+    WAIT_COME = 'WAIT_COME'
+    WAIT_GIVE = 'WAIT_GIVE'
+    GIVE = 'FUTURE_ARM_RELEASE'
+    DONE = 'MISSION_COMPLETE'
     STOP = 'SAFE_STOP'
 
 
@@ -23,16 +27,20 @@ _NEXT = {
     (State.READY, 'start'): State.GO,
     (State.GO, 'arrived'): State.WAIT,
     (State.WAIT, 'follow'): State.FOLLOW,
+    (State.FOLLOW, 'tracking_lost'): State.WAIT,
     (State.FOLLOW, 'stay'): State.STAY,
-    (State.FOLLOW, 'arrived'): State.WAIT,
-    (State.STAY, 'come'): State.COME,
-    (State.WAIT, 'come'): State.COME,
-    (State.COME, 'arrived'): State.WAIT,
-    (State.WAIT, 'fetch'): State.FIND,
+    (State.STAY, 'fetch'): State.FIND,
     (State.FIND, 'found'): State.ASK,
+    # Keep the existing development-only approval gate until safe autonomous
+    # hammer approach is implemented. These transitions do not execute actions.
     (State.ASK, 'yes'): State.NEAR,
-    (State.ASK, 'no'): State.WAIT,
+    (State.ASK, 'no'): State.STAY,
     (State.NEAR, 'near'): State.ARM,
+    (State.ARM, 'pickup_confirmed'): State.WAIT_COME,
+    (State.WAIT_COME, 'come'): State.COME,
+    (State.COME, 'arrived'): State.WAIT_GIVE,
+    (State.WAIT_GIVE, 'give'): State.GIVE,
+    (State.GIVE, 'release_confirmed'): State.DONE,
     (State.STOP, 'reset'): State.READY,
 }
 
@@ -43,7 +51,11 @@ class Mission:
         self.history = []
 
     def event(self, name: str, *, source: str = 'dev') -> bool:
-        """Simulate an event; caller must authenticate source in a real robot."""
+        """Simulate an event; a real robot needs authenticated, verified feedback.
+
+        Arrival, pickup and release confirmations are mock inputs here, never
+        inferred from issuing a command or from time passing.
+        """
         name = name.strip().lower()
         previous = self.state
         if name == 'stop':

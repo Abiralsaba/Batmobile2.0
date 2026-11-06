@@ -20,6 +20,7 @@ setup(
     license='Apache-2.0',
     entry_points={'console_scripts': [
         'mission_control_node = rover.mission_control_node:main',
+        'start_mission = rover.mission_control_node:start_mission',
         'mission_dashboard = rover.web:main',
         'rover_demo = rover.demo:main',
         'zed_body_bridge = rover.zed_body_bridge:main',

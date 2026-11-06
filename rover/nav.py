@@ -13,6 +13,20 @@ class Twist2:
     angular: float = 0.0
 
 
+@dataclass(frozen=True)
+class GNSSGoal:
+    """Validated destination in WGS84 decimal degrees; no navigation side effect."""
+    latitude: float
+    longitude: float
+
+    def __post_init__(self):
+        for name, limit in (('latitude', 90), ('longitude', 180)):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not -limit <= value <= limit or not isfinite(value)):
+                raise ValueError(f'{name} must be a finite number between {-limit} and {limit}')
+
+
 def follow(x_m: float, y_m: float, *, desired_m=2.0, max_v=0.20, max_w=0.30,
            tolerance_m=0.15) -> Twist2:
     if not all(isfinite(v) for v in (x_m, y_m, desired_m, max_v, max_w, tolerance_m)):

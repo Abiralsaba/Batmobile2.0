@@ -341,10 +341,11 @@ def _age_seconds(timestamp: str | None) -> float | None:
 class DashboardRuntime:
     """DEV simulator state; it never publishes ROS or motor commands."""
 
-    MOVEMENT_EVENTS = {'start', 'follow', 'come', 'yes'}
+    MOVEMENT_EVENTS = {'start', 'follow', 'fetch', 'search', 'come', 'yes', 'give'}
     ALLOWED_EVENTS = {
         'start', 'arrived', 'follow', 'stay', 'come', 'fetch', 'search',
         'found', 'yes', 'no', 'near', 'stop', 'reset',
+        'tracking_lost', 'pickup_confirmed', 'give', 'release_confirmed',
     }
 
     def __init__(self):
@@ -542,7 +543,7 @@ class DashboardRuntime:
             elif event == 'yes' and not self._fresh_hammer():
                 raise SafetyRejected('YES requires a fresh valid hammer target')
 
-            actual_event = 'fetch' if event == 'search' and self.mission.state == State.WAIT else event
+            actual_event = 'fetch' if event == 'search' and self.mission.state == State.STAY else event
             if event == 'search' and self.mission.state == State.FIND:
                 accepted = True
             else:
@@ -558,7 +559,8 @@ class DashboardRuntime:
                 self.motion_state = 'stationary' if self.mode == 'DEV' else 'unknown'
             elif event in self.MOVEMENT_EVENTS:
                 self.motion_state = 'moving' if self.mode == 'DEV' else 'unknown'
-            elif event in {'arrived', 'stay', 'near', 'no', 'reset'}:
+            elif event in {'arrived', 'stay', 'near', 'no', 'reset', 'tracking_lost',
+                           'found', 'pickup_confirmed', 'release_confirmed'}:
                 self.motion_state = 'stationary'
 
             self.last_command = {

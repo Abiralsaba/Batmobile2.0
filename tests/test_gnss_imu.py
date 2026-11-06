@@ -1,10 +1,12 @@
-"""Original driver/software tests. All serial enumeration and opens are mocked."""
+"""ROS wrapper/software tests. All serial enumeration and opens are mocked."""
 from datetime import datetime, timezone
 import math
-import struct
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+from rover.hipnuc import HI91, HI92, GRAVITY
+from test_hipnuc import payload, frame
 
 try:
     import pynmea2
@@ -12,31 +14,15 @@ try:
     from rclpy.parameter import Parameter
     import serial
     from builtin_interfaces.msg import Time
-    from rover.gnss_imu_node import (
-        GNSSIMUNode, N100HeadingDriver, TYPE_IMU, TYPE_AHRS, PAYLOAD_FORMATS,
-        extract_packets, parse_nmea, quat_mul, quat_to_roll_pitch,
-        select_serial_port, tilt_compensated_heading,
-    )
 except ImportError:
     rclpy = None
+else:
+    from rover.gnss_imu_node import (
+        GNSSIMUNode, N100HeadingDriver, parse_nmea, select_serial_port,
+    )
 
 
 NOW = 1792972800.
-
-
-def payload(kind, stamp=1, q=(1., 0., 0., 0.), mag=(1., 2., 3.)):
-    values = [0.] * (12 if kind == TYPE_IMU else 10)
-    if kind == TYPE_IMU:
-        values[6:9] = mag
-    else:
-        values[6:10] = q
-    return struct.pack(PAYLOAD_FORMATS[kind], *values, stamp)
-
-
-def frame(kind, stamp=1):
-    data = payload(kind, stamp)
-    # Opaque header bytes deliberately are NOT claimed as valid CRC values.
-    return bytes([0xFC, kind, len(data), 0x01, 0x22, 0x33, 0x44]) + data + b'\xfd'
 
 
 def sentence(kind='GGA', wall=NOW, talker='GP', **updates):
@@ -57,39 +43,7 @@ def sentence(kind='GGA', wall=NOW, talker='GP', **updates):
 
 
 @unittest.skipIf(rclpy is None, 'ROS and serial/NMEA dependencies required')
-class TestOriginalProtocol(unittest.TestCase):
-    def test_original_packet_layouts_and_chunked_stream(self):
-        self.assertEqual(len(payload(TYPE_IMU)), 56)
-        self.assertEqual(len(payload(TYPE_AHRS)), 48)
-        buffer = bytearray()
-        packets = []
-        for byte in b'noise' + frame(TYPE_IMU) + frame(TYPE_AHRS):
-            buffer.append(byte)
-            packets.extend(extract_packets(buffer))
-        self.assertEqual(packets, [(TYPE_IMU, payload(TYPE_IMU)), (TYPE_AHRS, payload(TYPE_AHRS))])
-        self.assertEqual(buffer, b'')
-
-    def test_corrupt_length_end_type_and_truncation_resynchronize(self):
-        good = frame(TYPE_AHRS)
-        broken = [frame(TYPE_IMU)[:-1] + b'\x00', b'\xfc\x40\x01\0\0\0\0bad',
-                  b'\xfc\x42\x30\0\0\0\0bad', frame(TYPE_IMU)[:20]]
-        for item in broken:
-            buffer = bytearray(item + good)
-            packets = extract_packets(buffer)
-            self.assertIn((TYPE_AHRS, payload(TYPE_AHRS)), packets)
-        buffer = bytearray(good[:20])
-        self.assertEqual(extract_packets(buffer), [])
-        buffer.extend(good[20:])
-        self.assertEqual(extract_packets(buffer), [(TYPE_AHRS, payload(TYPE_AHRS))])
-
-    def test_quaternion_order_and_original_heading_convention(self):
-        self.assertEqual(quat_mul((1, 0, 0, 0), (0, 1, 0, 0)), (0, 1, 0, 0))
-        self.assertEqual(quat_mul((0, 0, 0, 1), (0, 1, 0, 0)), (0, 0, 1, 0))
-        self.assertEqual(quat_to_roll_pitch((1, 0, 0, 0)), (0., 0.))
-        self.assertAlmostEqual(tilt_compensated_heading(0, 0, 1, 0, 0), 0.)
-        self.assertAlmostEqual(tilt_compensated_heading(0, 0, 0, 1, 0), 90.)
-        self.assertAlmostEqual(tilt_compensated_heading(0, 0, 0, -1, 0), 270.)
-
+class TestPortSelection(unittest.TestCase):
     def test_port_selection_is_explicit_or_unique(self):
         ports = [SimpleNamespace(device='/fake/a', vid=6790, pid=123),
                  SimpleNamespace(device='/fake/b', vid=6790, pid=124)]
@@ -116,41 +70,54 @@ class TestN100Driver(unittest.TestCase):
         self.clock_patch = patch('rover.gnss_imu_node.time', clock)
         self.clock_patch.start()
         self.addCleanup(self.clock_patch.stop)
-        self.driver = N100HeadingDriver(self.parent, '/fake/imu', 921600, timeout=.5)
+        self.driver = N100HeadingDriver(self.parent, '/fake/imu', 115200, timeout=.5)
         self.addCleanup(self.driver.close)
 
-    def packet(self, kind=TYPE_AHRS, source=1, **kwargs):
+    def packet(self, kind=HI91, source=1, **kwargs):
         self.driver.process_packet(kind, payload(kind, source, **kwargs),
                                    mono=self.mono, stamp=Time(sec=123))
 
     def test_orientation_transform_normalization_and_ros_unknown_fields(self):
-        self.packet(q=(2., 0., 0., 0.))
+        self.packet(q=(1.01, 0., 0., 0.))
         self.driver.update_and_publish()
         msg = self.driver.pub.publish.call_args.args[0]
-        self.assertAlmostEqual(msg.orientation.y, 1.)
-        self.assertAlmostEqual(msg.orientation.w, 0.)
+        self.assertAlmostEqual(msg.orientation.z, math.sqrt(.5))
+        self.assertAlmostEqual(msg.orientation.w, math.sqrt(.5))
         self.assertAlmostEqual(math.hypot(msg.orientation.x, msg.orientation.y,
                                          msg.orientation.z, msg.orientation.w), 1.)
         self.assertEqual(msg.header.frame_id, 'imu_link')
         self.assertEqual(msg.header.stamp.sec, 123)
         self.assertEqual(list(msg.orientation_covariance), [0.] * 9)
-        self.assertEqual(msg.angular_velocity_covariance[0], -1.)
-        self.assertEqual(msg.linear_acceleration_covariance[0], -1.)
+        self.assertEqual(list(msg.angular_velocity_covariance), [0.] * 9)
+        self.assertEqual(list(msg.linear_acceleration_covariance), [0.] * 9)
+        self.assertAlmostEqual(msg.angular_velocity.x, math.radians(20))
+        self.assertAlmostEqual(msg.angular_velocity.y, -math.radians(10))
+        self.assertAlmostEqual(msg.linear_acceleration.x, 2*GRAVITY)
+        self.assertAlmostEqual(msg.linear_acceleration.z, 3*GRAVITY)
 
-    def test_new_sample_only_not_timer_or_magnetometer_refresh(self):
+    def test_new_sample_only_not_timer_refresh(self):
         self.packet()
         self.driver.update_and_publish()
         for _ in range(4):
             self.mono += .1
-            self.packet(TYPE_IMU, source=int(self.mono*100))
             self.driver.update_and_publish()
         self.driver.pub.publish.assert_called_once()
         self.assertEqual(self.driver.latest['mono'], 10.)
-        self.assertIsNotNone(self.driver.latest['heading'])
         self.mono += .2
-        self.packet(TYPE_IMU, source=9999)
-        self.assertIsNone(self.driver.latest['heading'])
         self.assertEqual(self.driver.status(), 'STALE')
+        self.packet(source=2)
+        self.driver.update_and_publish()
+        self.assertEqual(self.driver.pub.publish.call_count, 2)
+        self.assertEqual(self.driver.status(), 'OK')
+
+    def test_hi92_no_timestamp_still_publishes_once_per_received_sample(self):
+        self.packet(HI92)
+        self.driver.update_and_publish()
+        self.driver.update_and_publish()
+        self.driver.pub.publish.assert_called_once()
+        self.packet(HI92)
+        self.driver.update_and_publish()
+        self.assertEqual(self.driver.pub.publish.call_count, 2)
 
     def test_stale_orientation_is_not_published(self):
         self.packet()
@@ -160,17 +127,51 @@ class TestN100Driver(unittest.TestCase):
 
     def test_replay_and_sensor_timestamp_restart_are_rejected(self):
         self.packet(source=10)
-        for stamp in (10, 9, -1):
+        for stamp in (10, 9, 0):
             with self.assertRaises(ValueError):
                 self.packet(source=stamp)
+        self.assertEqual(self.driver.latest['mono'], 10.)
 
-    def test_bad_quaternion_and_magnetometer_rejected(self):
+    def test_bad_quaternion_and_measurements_rejected(self):
         for q in ((0., 0., 0., 0.), (float('nan'), 0., 0., 0.), (float('inf'), 0., 0., 0.)):
             with self.assertRaises(ValueError):
                 self.packet(q=q)
-        for mag in ((0., 0., 0.), (float('nan'), 1., 2.)):
+        for acc in ((float('inf'), 0., 0.), (float('nan'), 1., 2.)):
             with self.assertRaises(ValueError):
-                self.packet(TYPE_IMU, mag=mag)
+                self.packet(acc=acc)
+        self.driver.update_and_publish()
+        self.driver.pub.publish.assert_not_called()
+
+    def test_reader_accepts_latest_of_multiple_frames_and_ignores_bad_crc(self):
+        good = frame(payload(stamp=1, yaw=20.)) + frame(payload(stamp=2, yaw=40.))
+        bad = bytearray(frame(payload(stamp=3, yaw=60.)))
+        bad[-1] ^= 1
+        self.driver.ser.in_waiting = len(good + bad)
+
+        def read(_):
+            self.driver.stop.set()  # Finish after processing this chunk.
+            return good + bad
+
+        self.driver.ser.read.side_effect = read
+        received = []
+        process = self.driver.process_packet
+
+        def capture(*args, **kwargs):
+            process(*args, **kwargs)
+            received.append(self.driver.latest['sample'].heading)
+
+        with patch.object(self.driver, 'process_packet', side_effect=capture):
+            self.driver.reader()
+        self.assertEqual(received, [340., 320.])
+        self.assertEqual(self.driver.latest, {})  # Worker exit invalidates freshness.
+
+    def test_backlog_is_dropped_without_publishing_buffered_data(self):
+        self.packet()
+        self.driver.ser.in_waiting = 20000
+        self.driver.ser.reset_input_buffer.side_effect = self.driver.stop.set
+        self.driver.reader()
+        self.driver.ser.reset_input_buffer.assert_called_once()
+        self.driver.ser.read.assert_not_called()
         self.driver.update_and_publish()
         self.driver.pub.publish.assert_not_called()
 

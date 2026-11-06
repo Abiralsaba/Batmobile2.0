@@ -12,7 +12,7 @@ import tempfile
 import time
 import unittest
 
-from test_follow import come, target
+from test_follow import follow_event, target
 
 try:
     import rclpy
@@ -103,39 +103,53 @@ class TestFollowROS(unittest.TestCase):
     def assert_no_motor_publishers(self):
         topics = dict(self.node.get_publisher_names_and_types_by_node('mission_control', '/'))
         self.assertEqual(set(topics) - {'/rosout', '/parameter_events'},
-                         {'/rover/state', '/rover/follow/guidance'})
+                         {'/rover/state', '/rover/follow/guidance', '/rover/mission/start_status'})
         self.assertEqual(topics['/rover/follow/guidance'], ['std_msgs/msg/String'])
         self.assertTrue(all(msg['motors_enabled'] is False for msg in self.messages))
+
+    def test_coordinate_prompt_reports_blocked_navigation(self):
+        executable = Path(get_package_prefix('mars_rover')) / 'lib/mars_rover/start_mission'
+        result = subprocess.run([str(executable)], input='23.8103\n90.4125\n',
+                                capture_output=True, text=True, timeout=15.)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('Destination latitude', result.stdout)
+        self.assertIn('Destination longitude', result.stdout)
+        self.assertIn('Mission controller received your destination', result.stdout)
+        self.assertIn('Rover remains stopped', result.stdout)
+        self.spin_for(.2)
+        self.assertEqual(self.messages[-1]['state'], 'READY')
+        self.assert_no_motor_publishers()
 
     def test_synthetic_topics_watchdog_and_publisher_contract(self):
         self.command('start', 'GO_TO_ASTRONAUT')
         self.command('arrived', 'WAIT_COMMAND')
         self.until(lambda: self.messages[-1]['tracking_valid'], tick=self.publish_target)
-        self.event_pub.publish(String(data=json.dumps(come(time.time()))))  # Exactly one COME.
+        self.event_pub.publish(String(data=json.dumps(follow_event(time.time()))))  # Exactly one FOLLOW.
         self.until(lambda: self.messages[-1]['reason'] == 'FOLLOWING', tick=self.publish_target)
         for distance, reason in ((2., 'DISTANCE_DEADBAND'), (1.5, 'TOO_CLOSE'), (3., 'FOLLOWING')):
             self.until(lambda: self.messages[-1]['reason'] == reason,
                        tick=lambda: self.publish_target(z=distance))
-        self.until(lambda: self.messages[-1]['reason'] == 'ID_MISMATCH',
+        self.until(lambda: self.messages[-1]['tracking_reason'] == 'ID_MISMATCH',
                    tick=lambda: self.publish_target(pid=8))
-        self.assertEqual(self.messages[-1]['person_id'], 7)
+        self.assertIsNone(self.messages[-1]['person_id'])
         self.assertEqual(self.messages[-1]['linear_mps'], 0.)
+        self.publish_target()
+        self.spin_for(.1)
+        self.assertEqual(self.messages[-1]['reason'], 'FOLLOW_GESTURE_REQUIRED')
+        self.event_pub.publish(String(data=json.dumps(follow_event(time.time()))))
         self.until(lambda: self.messages[-1]['reason'] == 'FOLLOWING', tick=self.publish_target)
         # No further targets: steady timer must revoke even with no ROS /clock.
         began = time.monotonic()
-        self.until(lambda: self.messages[-1]['reset_required'], timeout=1.5)
+        self.until(lambda: self.messages[-1]['reason'] == 'FOLLOW_GESTURE_REQUIRED', timeout=1.5)
         self.assertLess(time.monotonic() - began, 1.)
-        self.assertEqual(self.messages[-1]['state'], 'SAFE_STOP')
+        self.assertEqual(self.messages[-1]['state'], 'WAIT_COMMAND')
         self.assertEqual((self.messages[-1]['linear_mps'], self.messages[-1]['angular_rps']), (0., 0.))
         self.publish_target()
         self.spin_for(.1)
-        self.assertTrue(self.messages[-1]['reset_required'])
-        self.command('reset', 'READY')
-        self.command('start', 'GO_TO_ASTRONAUT')
-        self.command('arrived', 'WAIT_COMMAND')
+        self.assertFalse(self.messages[-1]['reset_required'])
         self.until(lambda: self.messages[-1]['tracking_valid'], tick=self.publish_target)
         self.assertEqual(self.messages[-1]['linear_mps'], 0.)
-        self.event_pub.publish(String(data=json.dumps(come(time.time()))))
+        self.event_pub.publish(String(data=json.dumps(follow_event(time.time()))))
         self.until(lambda: self.messages[-1]['reason'] == 'FOLLOWING', tick=self.publish_target)
         self.command('stop', 'SAFE_STOP')
         self.assertEqual(self.messages[-1]['linear_mps'], 0.)
@@ -160,6 +174,27 @@ class TestFollowROS(unittest.TestCase):
             self.spin_for(.08)
         self.assertEqual(len(self.events), 1)
         self.assertEqual(self.events[0]['person_id'], 7)
+        self.assertEqual(self.events[0]['gesture'], 'FOLLOW')
+        self.assertEqual(self.messages[-1]['state'], 'FOLLOW')
+        self.assertEqual(self.messages[-1]['linear_mps'], .20)
+        # Lose the person, then repeat the gesture with a new tracking ID.
+        # Neither vision, gesture nor mission controller is restarted.
+        for _ in range(6):
+            bodies_pub.publish(String(data=json.dumps(dict(timestamp=time.time(),
+                                                           detected=False, people=[]))))
+            self.spin_for(.08)
+        self.assertEqual(self.messages[-1]['state'], 'WAIT_COMMAND')
+        self.assertEqual(self.messages[-1]['linear_mps'], 0.)
+        for wrist_y in [.22]*8 + [-.14]*6 + [.22]*16:
+            points = [[0., 0., 3.] for _ in range(18)]
+            points[4][1], points[7][1] = wrist_y, .22
+            person = dict(id=9, tracking_state='OK', x_m=0., y_m=0., z_m=3.,
+                          distance_m=3., bearing_deg=0., keypoints_m=points)
+            bodies_pub.publish(String(data=json.dumps(dict(timestamp=time.time(), detected=True,
+                                                           people=[person]))))
+            self.spin_for(.08)
+        self.assertEqual(len(self.events), 2)
+        self.assertEqual(self.events[-1]['person_id'], 9)
         self.assertEqual(self.messages[-1]['state'], 'FOLLOW')
         self.assertEqual(self.messages[-1]['linear_mps'], .20)
         self.assert_no_motor_publishers()

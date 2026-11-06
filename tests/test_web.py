@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -177,6 +178,58 @@ class DashboardApiTests(unittest.TestCase):
             json={'etag': snapshot['etag'], 'data': snapshot['data']},
         )
         self.assertEqual(save.status_code, 423)
+
+    def test_complete_dev_sequence_and_feedback_are_simulation_only(self):
+        snapshot = self.configured_target()
+        data = deepcopy(snapshot['data'])
+        data['astronaut_assistance']['updated_astronaut_location'] = {
+            'latitude': 38.406, 'longitude': -110.792,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        }
+        saved = self.client.put('/api/config', json={'etag': snapshot['etag'], 'data': data})
+        self.assertEqual(saved.status_code, 200)
+
+        def command(event, expected):
+            result = self.client.post('/api/command', json={'command': event, 'confirmed': True})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['state'], expected)
+            self.assertFalse(result.json()['hardware_command_sent'])
+
+        command('start', 'GO_TO_ASTRONAUT')
+        command('arrived', 'WAIT_COMMAND')
+        premature = self.client.post('/api/command', json={'command': 'fetch', 'confirmed': True})
+        self.assertEqual(premature.status_code, 409)
+        self.client.post('/api/dev/telemetry', json={'updates': {
+            'camera_connected': True, 'person_detected': True, 'person_confidence': 0.9,
+        }})
+        command('follow', 'FOLLOW')
+        command('stay', 'STAY_LOCKED')
+        premature = self.client.post('/api/command', json={'command': 'come', 'confirmed': True})
+        self.assertEqual(premature.status_code, 409)
+        command('search', 'FIND_HAMMER')
+        command('found', 'WAIT_APPROVAL')
+        missing_target = self.client.post('/api/command', json={'command': 'yes', 'confirmed': True})
+        self.assertEqual(missing_target.status_code, 409)
+        self.client.post('/api/dev/telemetry', json={'updates': {
+            'hammer_detected': True, 'hammer_valid': True,
+        }})
+        for event, state in (
+            ('yes', 'APPROACH_HAMMER'), ('near', 'FUTURE_ARM_PICKUP'),
+            ('pickup_confirmed', 'WAIT_COME'), ('come', 'COME'),
+            ('arrived', 'WAIT_GIVE'), ('give', 'FUTURE_ARM_RELEASE'),
+            ('release_confirmed', 'MISSION_COMPLETE'),
+        ):
+            command(event, state)
+        self.assertEqual(self.client.get('/api/status').json()['motion_state'], 'stationary')
+
+    def test_live_mode_rejects_simulated_action_feedback(self):
+        self.configured_target()
+        self.client.post('/api/mode', json={'mode': 'LIVE'})
+        for event in ('fetch', 'tracking_lost', 'pickup_confirmed', 'give', 'release_confirmed'):
+            with self.subTest(event=event):
+                result = self.client.post('/api/command', json={'command': event, 'confirmed': True})
+                self.assertEqual(result.status_code, 409)
+                self.assertIn('LIVE controls are disabled', result.json()['detail'])
 
     def test_sub_mission_selection_and_telemetry_validation(self):
         selected = self.client.post('/api/sub-mission', json={'sub_mission': 'ROUTE FINDING'})

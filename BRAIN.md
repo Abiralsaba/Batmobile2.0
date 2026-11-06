@@ -30,7 +30,7 @@ The topic names in `config.yaml` are illustrative. Query real ROS topics, frames
 
 ## Important boundary
 Current stack is **non-actuating**. `mission_control_node.py` retains `/dev/cmd`
-and `/rover/state`, consumes confirmed COME and validated vision targets, and
+and `/rover/state`, consumes confirmed FOLLOW gestures and validated vision targets, and
 publishes String-only `/rover/follow/guidance`. Camera-to-base_link calibration,
 Whisper, obstacle navigation and motor integration remain unfinished.
 
@@ -84,3 +84,38 @@ When implementing a stage, update this checklist, `ROADMAP.md`, module docstring
   recovery and false-activation testing remain with the operators.
 - All 94 tests passed (including two isolated ROS transport/pipeline tests),
   Python syntax and diff checks passed, and colcon build/executable discovery passed.
+
+## FOLLOW recovery update — 2026-11-06
+
+- Visual gesture events are now `FOLLOW`; the separate mission COME task is unchanged.
+- Tracking loss/disconnect clears authorization and returns to WAIT_COMMAND.
+  A fresh complete gesture and confirmed vision lock resume FOLLOW without node
+  restarts; merely seeing the person again never resumes guidance.
+- Gesture selection requires fresh mission permission, with a one-second cooldown
+  and cleared motion history after each event. Active FOLLOW, STOP and STAY disable
+  selection. STOP/STAY cannot be cleared by a gesture or camera recovery.
+- This supersedes the one-shot/restart recovery described in the historical Stage 4
+  entry above. Guidance remains diagnostic; no velocity or motor publisher added.
+
+## Mission sequence update — 2026-11-06
+
+- Mock execution now follows initial approach → FOLLOW → STAY → FETCH → COME →
+  GIVE. FETCH starts from STAY; COME requires pickup confirmation; arrival from
+  COME waits for GIVE; release confirmation completes the simulated mission.
+- Keep development YES/NO before hammer approach. Declining returns to STAY for
+  another FETCH request. Actual autonomous FETCH and GIVE remain unimplemented.
+- Following-distance arrival is not mission completion. Tracking loss still
+  requires a fresh FOLLOW gesture; later mission stages do not accept gestures.
+- All action confirmations are trusted simulation inputs, not sensor verification.
+  The dashboard remains DEV-only for transitions; motors and arm remain disabled.
+
+## Coordinate startup — 2026-11-06
+
+- User wants startup to ask for coordinates, then navigate there; user will provide
+  the Jetson/drive-Pi ROS interface listings later. No drive interface is known yet.
+- `ros2 run mars_rover start_mission` now prompts for latitude/longitude and waits
+  for the mission controller's acknowledgement. Validated coordinates are held
+  in controller memory; invalid, stale/replayed and non-READY requests are rejected.
+- Navigation remains unavailable: the destination path stays READY with no motor
+  output, no automatic dispatch and no fabricated arrival. The client reports this
+  explicitly. Physical navigation integration is outstanding, not completed.

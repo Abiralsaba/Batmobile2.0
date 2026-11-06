@@ -4,7 +4,7 @@ Whisper.cpp adapter is FUTURE; never treat text as an unvalidated motor command.
 """
 from typing import Optional
 
-_COMMANDS = {'start','follow','stay','come','fetch','yes','no','stop'}
+_COMMANDS = {'start','follow','stay','come','fetch','give','yes','no','stop'}
 _ALIASES = {'go':'start', 'emergency stop':'stop'}
 
 
